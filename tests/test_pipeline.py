@@ -7,11 +7,10 @@ import run_all
 def test_pipeline_runs_on_synthetic_data(tmp_path: Path):
     res = run_all.main(synthetic=True, out_dir=tmp_path)
     rep = tmp_path / "reports"
-    for f in ["summary.md", "metrics.json", "experiment_lift.png", "observational_benchmark.png",
-              "star_cluster.png", "cuped_variance_reduction.png", "proxy_validation.png",
-              "experiment_effects.csv"]:
+    for f in ["summary.md", "metrics.json", "experiment_lift.png", "bayes_probability.png",
+              "without_a_test.png", "targeting_overlap.png", "proxy_validation.png",
+              "cuped_variance_reduction.png", "market_randomization.png", "experiment_effects.csv"]:
         assert (rep / f).exists(), f"missing {f}"
-    assert res["experiment"]["srm"]["ok"]
-    # the synthetic LaLonde effect is 1,800: doubly robust should land near it
-    aipw = res["lalonde"]["estimates"]["Doubly robust (AIPW)"]["effect"]
-    assert 800 < aipw < 2800
+    assert res["part1"]["srm"]["ok"]
+    # synthetic visits have a known positive effect: part 2's doubly robust estimate must see it
+    assert res["part2"]["estimates"]["Doubly robust (AIPW)"]["ci_low"] > 0

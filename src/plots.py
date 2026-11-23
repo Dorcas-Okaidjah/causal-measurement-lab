@@ -95,24 +95,19 @@ def proxy_scatter(table):
     _save(fig, "proxy_validation.png")
 
 
-def benchmark_forest(hill, lal):
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4.6))
-    for ax, res, title, fmt, xlabel in [
-        (axes[0], hill, "Hillstrom: targeting bias removed by adjustment",
-         lambda v: f"{v:.1%}", "Effect on visit rate (truth band = experiment)"),
-        (axes[1], lal, "LaLonde: methods vs the experimental answer",
-         lambda v: f"${v:,.0f}", "Effect on 1978 earnings (truth band = experiment)")]:
-        est = res["estimates"]
-        names = list(est)
-        t = res["truth"]
-        _forest(ax, names, [est[n]["effect"] for n in names], [est[n]["ci_low"] for n in names],
-                [est[n]["ci_high"] for n in names], COL["b"], truth=t["effect"],
-                truth_ci=(t["ci_low"], t["ci_high"]))
-        _style(ax, title, xlabel, "")
-    axes[0].xaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(1.0, decimals=1))
-    axes[1].xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(
-        lambda v, _: f"{'-' if v < 0 else ''}${abs(v) / 1000:.0f}k"))
-    _save(fig, "observational_benchmark.png")
+def benchmark_forest(obs):
+    """Each method's estimate vs the randomized answer (grey band)."""
+    fig, ax = plt.subplots(figsize=(7.8, 4.4))
+    est = {**obs["estimates"], **obs["unmeasured"]}
+    names = list(est)
+    t = obs["truth"]
+    _forest(ax, names, [est[n]["effect"] for n in names], [est[n]["ci_low"] for n in names],
+            [est[n]["ci_high"] for n in names], COL["b"], truth=t["effect"],
+            truth_ci=(t["ci_low"], t["ci_high"]))
+    _style(ax, "Adjustment removes the targeting bias",
+           "Effect on visit rate (grey band = randomized test)", "")
+    ax.xaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(1.0, decimals=1))
+    _save(fig, "without_a_test.png")
 
 
 def overlap_hist(ps, t, name, title):
@@ -121,35 +116,28 @@ def overlap_hist(ps, t, name, title):
     bins = np.linspace(0, 1, 41)
     ax.hist(ps[~t], bins=bins, density=True, color=COL["a"], alpha=0.75, label="Comparison group")
     ax.hist(ps[t], bins=bins, density=True, color=COL["b"], alpha=0.75, label="Treated")
-    ax.set_yscale("log")
-    _style(ax, title, "Propensity score (estimated chance of treatment)", "Density (log scale)")
+    _style(ax, title, "Propensity score (estimated chance of treatment)", "Density")
     ax.legend(frameon=False)
     _save(fig, name)
 
 
-def star_chart(star):
-    fig, axes = plt.subplots(1, 2, figsize=(13, 4.8), gridspec_kw={"width_ratios": [1.2, 1]})
-    m = star["models"]
-    names = list(m)
-    _forest(axes[0], names, [m[n]["effect"] for n in names], [m[n]["ci_low"] for n in names],
-            [m[n]["ci_high"] for n in names], COL["a"])
-    axes[0].axvline(0, color=COL["ink"], lw=1)
-    _style(axes[0], "Small classes: same effect, honest intervals are wider",
-           "Effect on test scores (standard deviations)", "")
-    p = star["power"]
-    labels = ["Students\nrandomized", "Schools\nrandomized", "Schools randomized,\nwrong analysis,\nno real effect"]
+def market_chart(cl):
+    """Power of customer vs market randomization, and false positives from the wrong analysis."""
+    fig, ax = plt.subplots(figsize=(7, 4.4))
+    p = cl["power"]
+    labels = ["Customers\nrandomized", "Markets\nrandomized", "Markets randomized,\nwrong analysis,\nno real effect"]
     vals = [p["individual"], p["cluster"], p["false_positive_rate_wrong_analysis"]]
-    bars = axes[1].bar(labels, vals, color=[COL["a"], COL["a"], COL["b"]], width=0.6)
+    bars = ax.bar(labels, vals, color=[COL["a"], COL["a"], COL["b"]], width=0.6)
     for b, v in zip(bars, vals):
-        axes[1].text(b.get_x() + b.get_width() / 2, v + 0.02, f"{v:.0%}", ha="center",
-                     color=COL["ink"], fontsize=10)
-    axes[1].axhline(C.ALPHA, color=COL["muted"], lw=0.8, ls="--")
-    axes[1].set_ylim(0, 1.08)
-    axes[1].yaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(1.0, decimals=0))
-    _style(axes[1], f"Share of simulated tests significant (true effect {star['power_effect']} sd)", "",
-           "Share of simulated tests significant")
-    axes[1].grid(axis="x", visible=False)
-    _save(fig, "star_cluster.png")
+        ax.text(b.get_x() + b.get_width() / 2, v + 0.02, f"{v:.0%}", ha="center",
+                color=COL["ink"], fontsize=10)
+    ax.axhline(C.ALPHA, color=COL["muted"], lw=0.8, ls="--")
+    ax.set_ylim(0, 1.08)
+    ax.yaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(1.0, decimals=0))
+    _style(ax, f"Share of simulated tests significant (true lift {cl['planned_lift']:.0%})", "",
+           "Share of simulated tests")
+    ax.grid(axis="x", visible=False)
+    _save(fig, "market_randomization.png")
 
 
 def bayes_chart(bayes):

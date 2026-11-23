@@ -1,7 +1,11 @@
-"""Run all three studies end to end.
+"""Run the whole e-mail campaign measurement project.
 
     python run_all.py               # real data (download first: python -m src.data --download)
     python run_all.py --synthetic   # fake data with known answers, no download (smoke test)
+
+Part 1: did the campaign work?             (randomized test readout)
+Part 2: could we have measured it without a test?   (observational methods vs the truth)
+Part 3: how should the next test be designed?       (power, proxy, CUPED, market randomization)
 
 Outputs land in reports/: charts, tables, metrics.json and summary.md.
 """
@@ -15,7 +19,7 @@ import pandas as pd
 
 from src import config as C, plots, report
 from src import data as D
-from src.analyses import email_experiment, observational_benchmark, star_cluster
+from src.analyses import part1_readout, part2_without_a_test, part3_next_test
 
 
 def _jsonable(obj):
@@ -39,36 +43,29 @@ def main(synthetic: bool = False, out_dir=None) -> dict:
         C.REPORT_DIR = out_dir / "reports"
 
     print("1/5 loading data")
-    if synthetic:
-        h, l, s = (D.make_synthetic_experiment(), D.make_synthetic_lalonde(),
-                   D.make_synthetic_star())
-    else:
-        h, l, s = D.load_hillstrom(), D.load_lalonde(), D.load_star()
+    h = D.make_synthetic_experiment() if synthetic else D.load_hillstrom()
 
-    print("2/5 study 1: e-mail experiment readout")
-    exp = email_experiment.run(h)
-    print("3/5 study 2: observational methods vs known answers")
-    obs_h = observational_benchmark.run_hillstrom(h)
-    obs_l = observational_benchmark.run_lalonde(l)
-    print("4/5 study 3: cluster randomization (STAR)")
-    star = star_cluster.run(s)
+    print("2/5 part 1: did the campaign work?")
+    p1 = part1_readout.run(h)
+    print("3/5 part 2: could we have measured it without a test?")
+    p2 = part2_without_a_test.run(h)
+    print("4/5 part 3: how should the next test be designed?")
+    p3 = part3_next_test.run(h, p1["effects"])
 
     print("5/5 writing charts, tables and the summary")
     C.REPORT_DIR.mkdir(parents=True, exist_ok=True)
-    plots.lift_forest(exp["effects"])
-    plots.bayes_chart(exp["bayes"])
-    plots.cuped_curve(exp["cuped_corr"]["spend"])
-    plots.proxy_scatter(exp["proxy"]["segments_table"])
-    plots.benchmark_forest(obs_h, obs_l)
-    plots.overlap_hist(obs_l["diagnostics"]["propensity"],
-                       obs_l["diagnostics"]["treated"],
-                       "lalonde_overlap.png",
-                       "LaLonde: many comparison people look nothing like trainees")
-    plots.star_chart(star)
-    exp["effects"].to_csv(C.REPORT_DIR / "experiment_effects.csv", index=False)
-    exp["subgroups"].to_csv(C.REPORT_DIR / "experiment_subgroups.csv", index=False)
-    res = {"synthetic": synthetic, "experiment": exp, "hillstrom_obs": obs_h,
-           "lalonde": obs_l, "star": star}
+    plots.lift_forest(p1["effects"])
+    plots.bayes_chart(p1["bayes"])
+    plots.benchmark_forest(p2)
+    plots.overlap_hist(p2["diagnostics"]["propensity"], p2["diagnostics"]["treated"],
+                       "targeting_overlap.png",
+                       "Targeted customers still overlap with untargeted ones")
+    plots.proxy_scatter(p3["proxy"]["segments_table"])
+    plots.cuped_curve(p1["cuped_corr"]["spend"])
+    plots.market_chart(p3["cluster"])
+    p1["effects"].to_csv(C.REPORT_DIR / "experiment_effects.csv", index=False)
+    p1["subgroups"].to_csv(C.REPORT_DIR / "experiment_subgroups.csv", index=False)
+    res = {"synthetic": synthetic, "part1": p1, "part2": p2, "part3": p3}
     report.write_summary(res)
     res["seconds"] = round(time.time() - t0, 1)
     (C.REPORT_DIR / "metrics.json").write_text(json.dumps(_jsonable(res), indent=2))

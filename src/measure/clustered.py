@@ -1,8 +1,8 @@
-"""Experiments where people come in groups (clusters): schools, stores,
-agencies, regions.
+"""Experiments where whole groups (clusters) are randomized: stores, regions,
+agencies, markets.
 
-People in the same cluster resemble each other, so 1,000 students in 40
-schools carry much less information than 1,000 independent students. Ignoring
+People in the same cluster resemble each other, so 1,000 customers in 40
+markets carry less information than 1,000 independent customers. Ignoring
 this makes confidence intervals too narrow and finds 'effects' that are noise.
 """
 from __future__ import annotations
@@ -23,7 +23,7 @@ def ols_effect(df: pd.DataFrame, outcome: str, treat: str, controls: list[str] =
 
     X = df[[treat, *controls]].astype(float)
     if fixed_effects:
-        # one 0/1 column per school (minus one): compares students within schools
+        # one 0/1 column per cluster (minus one): compares people within clusters
         X = pd.concat([X, pd.get_dummies(df[fixed_effects], prefix="fe",
                                          drop_first=True).astype(float)], axis=1)
     model = sm.OLS(df[outcome].astype(float), sm.add_constant(X))
@@ -58,14 +58,21 @@ def design_effect(icc_value: float, mean_cluster_size: float) -> float:
     return float(1 + (mean_cluster_size - 1) * icc_value)
 
 
+def clusters_needed(n_per_arm_individual: int, icc_value: float, cluster_size: float) -> int:
+    """Clusters per arm a cluster-randomized test needs to match the power of an
+    individually randomized test with n_per_arm_individual people per arm."""
+    deff = design_effect(icc_value, cluster_size)
+    return int(np.ceil(n_per_arm_individual * deff / cluster_size))
+
+
 def power_by_design(df: pd.DataFrame, outcome: str, cluster: str, effect: float,
                     n_sims: int = C.N_POWER_SIMS, alpha=C.ALPHA, seed=C.RANDOM_STATE) -> dict:
-    """Simulated power of two designs on the same real students:
+    """Simulated power of two designs on the same real people:
 
-    * individual: randomize students, compare means (Welch test)
-    * cluster:    randomize whole schools, compare school means (t-test on
+    * individual: randomize people, compare means (Welch test)
+    * cluster:    randomize whole clusters, compare cluster means (t-test on
                   cluster means, the simplest valid analysis)
-    * cluster, wrong analysis: randomize schools but analyse as if students
+    * cluster, wrong analysis: randomize clusters but analyse as if people
                   were randomized. Reported under effect = 0 too, to show how
                   often it falsely declares an effect.
 
@@ -74,7 +81,7 @@ def power_by_design(df: pd.DataFrame, outcome: str, cluster: str, effect: float,
     rng = np.random.default_rng(seed)
     y0 = df[outcome].to_numpy(float)
     g = df[cluster].to_numpy()
-    schools = np.unique(g)
+    clusters = np.unique(g)
     hits = {"individual": 0, "cluster": 0, "cluster_wrong_analysis": 0}
     false_pos = 0
     for _ in range(n_sims):
@@ -84,11 +91,11 @@ def power_by_design(df: pd.DataFrame, outcome: str, cluster: str, effect: float,
         if stats.ttest_ind(y[t], y[~t], equal_var=False).pvalue < alpha:
             hits["individual"] += 1
         # cluster randomization
-        treated_schools = rng.choice(schools, len(schools) // 2, replace=False)
-        tc = np.isin(g, treated_schools)
+        treated_clusters = rng.choice(clusters, len(clusters) // 2, replace=False)
+        tc = np.isin(g, treated_clusters)
         y = y0 + effect * tc
         means = pd.Series(y).groupby(g).mean()
-        is_t = means.index.isin(treated_schools)
+        is_t = means.index.isin(treated_clusters)
         if stats.ttest_ind(means[is_t], means[~is_t], equal_var=False).pvalue < alpha:
             hits["cluster"] += 1
         if stats.ttest_ind(y[tc], y[~tc], equal_var=False).pvalue < alpha:

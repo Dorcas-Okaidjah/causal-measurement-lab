@@ -13,15 +13,15 @@ def _prob(x):
 
 
 def write_summary(r: dict) -> None:
-    e, o, l, s = r["experiment"], r["hillstrom_obs"], r["lalonde"], r["star"]
+    e, o, n = r["part1"], r["part2"], r["part3"]
     L = []
     w = L.append
     if r.get("synthetic"):
         w("> **Synthetic data run** (smoke test). Numbers below are not meaningful.\n")
-    w("# Measurement readout\n")
+    w("# E-mail campaign measurement readout\n")
 
-    # ---------------- experiment ----------------
-    w("## 1. E-mail campaign test (Hillstrom, randomized, 64,000 customers)\n")
+    # ---------------- part 1 ----------------
+    w("## Part 1. Did the campaign work? (randomized test, 64,000 customers)\n")
     srm = e["srm"]
     w(f"**Test health.** Group sizes {', '.join(f'{k}: {v:,}' for k, v in srm['observed'].items())}; "
       f"sample-ratio check p = {srm['p_value']:.2f} ({'pass' if srm['ok'] else 'FAIL'}). "
@@ -40,61 +40,65 @@ def write_summary(r: dict) -> None:
                   f"+{v['avg_marginal_effect']:.1%} points" for a, v in g.items()) + ".\n")
     sp = e["effects"][e["effects"].metric == "spend"]
     w(f"**CUPED.** Using prior-year spend removed only {sp['cuped_variance_reduction'].max():.2%} "
-      f"of the variance in spend, because it correlates just "
-      f"{e['cuped_corr']['spend']:.2f} with two-week spend. Variance reduction equals the squared "
-      f"correlation, so CUPED pays off only with a strongly predictive pre-period metric.\n")
+      f"of the variance in spend, because it correlates just {e['cuped_corr']['spend']:.2f} "
+      f"with two-week spend.\n")
     b = e["bayes"]
     w("**Bayesian view.** Probability each e-mail increases spend: "
       + "; ".join(f"{a} {_prob(b[a]['spend']['prob_better'])} (expected loss if wrong "
                   f"${b[a]['spend']['expected_loss']:.4f} per customer)" for a in C.TREATMENTS) + ".\n")
-    pr = e["proxy"]
-    w(f"**Is visit a valid proxy for spend?** Visitors spend more (customer-level correlation "
+    s = e["subgroups"]
+    nz = s[(s.metric == "spend") & (s.p_holm > C.ALPHA)]
+    w("**Subgroups.** No measurable spend effect (Holm p > 0.05) in: "
+      + "; ".join(f"{x.arm} / {x.subgroup}" for _, x in nz.iterrows()) + ".\n")
+
+    # ---------------- part 2 ----------------
+    w("## Part 2. Could we have measured it without a test?\n")
+    t = o["truth"]
+    w(f"Treated customers were thinned by a targeting rule favouring engaged customers "
+      f"({o['n_treated_kept']:,} of {o['n_treated_full']:,} kept). Randomized truth for the "
+      f"Women's e-mail effect on visit rate: {t['effect']:.2%} ({t['ci_low']:.2%} to {t['ci_high']:.2%}).\n")
+    w("| Method | Estimate | 95% CI | Gap to truth |")
+    w("|---|---|---|---|")
+    for k, v in {**o["estimates"], **o["unmeasured"]}.items():
+        w(f"| {k} | {v['effect']:.2%} | {v['ci_low']:.2%} to {v['ci_high']:.2%} | "
+          f"{(v['effect'] - t['effect']) * 100:+.2f} pts |")
+    d = o["diagnostics"]
+    w(f"\nBalance: largest |SMD| {d['balance_before'].abs().max():.2f} before weighting, "
+      f"{d['balance_after'].abs().max():.2f} after. Overlap: "
+      f"{d['overlap']['share_treated_inside']:.0%} of treated and "
+      f"{d['overlap']['share_control_inside']:.0%} of untreated customers inside the common range.\n")
+
+    # ---------------- part 3 ----------------
+    w("## Part 3. How should the next test be designed?\n")
+    pw = n["power"]
+    w(f"**Sample size.** With {pw['n_per_arm']:,} customers per group the smallest detectable spend "
+      f"effect is ${pw['mde_spend']:.2f} ({pw['mde_spend_pct']:.0%} of the control mean). Detecting a "
+      f"10% spend lift needs {pw['n_for_10pct_lift']:,} per group; a 10% visit lift needs "
+      f"{pw['n_for_10pct_lift_visit']:,}.\n")
+    pr = n["proxy"]
+    w(f"**Can visit stand in for spend?** Visitors spend more (customer-level correlation "
       f"{pr['individual_corr']:.2f}), but across {pr['n_segments']} segments the visit effect "
       f"predicts the spend effect only weakly (split-sample correlation {pr['split_sample_corr']:.2f}; "
       f"90% of splits between {pr['corr_range'][0]:.2f} and {pr['corr_range'][1]:.2f}). "
       f"At campaign level both e-mails earn about "
       + " and ".join(f"${v:.0f}" for v in pr["spend_per_extra_visit"].values())
-      + " per extra visit. Use visit as an early read on a whole campaign, not to choose segments.\n")
-    pw = e["power"]
-    w(f"**Next test.** With {pw['n_per_arm']:,} customers per group the smallest detectable spend "
-      f"effect is ${pw['mde_spend']:.2f} ({pw['mde_spend_pct']:.0%} of the control mean). Detecting a "
-      f"10% spend lift needs {pw['n_for_10pct_lift']:,} per group; a 10% visit lift needs "
-      f"{pw['n_for_10pct_lift_visit']:,}.\n")
-
-    # ---------------- observational ----------------
-    w("## 2. Observational methods vs known answers\n")
-    for name, res, fmt, gap in [
-        ("Hillstrom with targeting bias (effect on visit rate, ATC)", o, "{:.2%}",
-         lambda v: f"{v * 100:+.2f} pts"),
-        ("LaLonde: NSW trainees vs CPS comparison group (effect on 1978 earnings, ATT)", l,
-         "${:,.0f}", lambda v: f"{'+' if v >= 0 else '-'}${abs(v):,.0f}")]:
-        t = res["truth"]
-        w(f"**{name}.** Experimental truth {fmt.format(t['effect'])} "
-          f"({fmt.format(t['ci_low'])} to {fmt.format(t['ci_high'])}).\n")
-        w("| Method | Estimate | 95% CI | Gap to truth |")
-        w("|---|---|---|---|")
-        for k, v in {**res["estimates"], **res.get("unmeasured", {})}.items():
-            w(f"| {k} | {fmt.format(v['effect'])} | {fmt.format(v['ci_low'])} to "
-              f"{fmt.format(v['ci_high'])} | {gap(v['effect'] - t['effect'])} |")
-        d = res["diagnostics"]
-        w(f"\nBalance: largest |SMD| {d['balance_before'].abs().max():.2f} before weighting, "
-          f"{d['balance_after'].abs().max():.2f} after. Comparison-group share inside the "
-          f"treated propensity range: {d['overlap']['share_control_inside']:.0%}.\n")
-
-    # ---------------- STAR ----------------
-    w("## 3. Cluster randomization (Tennessee STAR, kindergarten)\n")
-    w(f"{s['n_students']:,} students in {s['n_schools']} schools, small vs regular classes, "
-      f"randomized within schools. School-level ICC {s['icc']:.2f}, average "
-      f"{s['mean_cluster_size']:.0f} students per school. If whole schools were randomized "
-      f"instead, the design effect would be {s['design_effect']:.1f}: these students would carry "
-      f"the information of about {s['effective_n']:,.0f} independent students.\n")
-    w("| Analysis | Effect (sd) | SE | 95% CI |")
-    w("|---|---|---|---|")
-    for k, v in s["models"].items():
-        w(f"| {k} | {v['effect']:.3f} | {v['se']:.3f} | {v['ci_low']:.3f} to {v['ci_high']:.3f} |")
-    p = s["power"]
-    w(f"\nPower to detect {s['power_effect']} sd: randomizing students {p['individual']:.0%}; "
-      f"randomizing schools {p['cluster']:.0%}. Randomizing schools but analysing students as "
-      f"independent declared a significant effect {p['false_positive_rate_wrong_analysis']:.0%} of "
-      f"the time when there was none (should be {C.ALPHA:.0%}).\n")
+      + " per extra visit.\n")
+    cu = n["cuped"]
+    w(f"**CUPED.** All pre-period data together predicts {cu['visit']['r2_all_pre_period']:.1%} of "
+      f"the variance in visits and {cu['spend']['r2_all_pre_period']:.2%} in spend, so CUPED "
+      f"would save little here. A metric measured just before the test would do better.\n")
+    c = n["cluster"]
+    w(f"**Randomizing whole markets.** {c['n_markets']} markets (location type x channel x "
+      f"spending tier), about {c['mean_market_size']:.0f} customers each in the control group. "
+      f"Visit-rate ICC {c['icc_visit']:.3f}, design effect {c['design_effect']:.1f}. To detect a "
+      f"{c['planned_lift']:.0%} visit lift, customer randomization needs "
+      f"{c['n_per_arm_individual']:,} customers per arm; market randomization needs "
+      f"{c['markets_per_arm_needed']} markets per arm, more than exist. In one example market "
+      f"test, the naive standard error was {c['example_naive']['se']:.4f} and the cluster-robust one "
+      f"{c['example_cluster_robust']['se']:.4f}.\n")
+    p = c["power"]
+    w(f"Simulated power: customers randomized {p['individual']:.0%}, markets randomized "
+      f"{p['cluster']:.0%}. Randomizing markets but analysing customers as independent declared "
+      f"an effect {p['false_positive_rate_wrong_analysis']:.0%} of the time when there was none "
+      f"(should be {C.ALPHA:.0%}).\n")
     (C.REPORT_DIR / "summary.md").write_text("\n".join(L) + "\n")

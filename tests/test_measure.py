@@ -130,6 +130,11 @@ def test_design_effect_formula():
     assert CL.design_effect(0.1, 11) == pytest.approx(2.0)
 
 
+def test_clusters_needed_matches_design_effect():
+    # 1,000 people per arm, ICC 0.1, clusters of 11: design effect 2 -> 2,000 people -> 182 clusters
+    assert CL.clusters_needed(1000, 0.1, 11) == 182
+
+
 def test_cluster_robust_se_is_wider_when_treatment_is_clustered(rng):
     d = _clustered(rng)
     d["t"] = (d["g"] % 2 == 0).astype(int)           # whole clusters treated

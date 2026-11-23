@@ -4,6 +4,4 @@ scipy>=1.10
 scikit-learn>=1.3
 statsmodels>=0.14
 matplotlib>=3.7
-pyreadr>=0.5       # reads the STAR data's R file; no R installation needed
-causaldata>=0.1.4  # LaLonde / NSW job-training data
 pytest>=7.0
